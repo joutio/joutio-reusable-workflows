@@ -1,0 +1,143 @@
+name: Prune Packages & Caches
+
+# Réduit l'empreinte de stockage GitHub (allowance partagée artefacts + GitHub Packages) :
+#  - purge les anciennes versions d'images GHCR (en conservant les N plus récentes + les tags déployés) ;
+#  - purge les anciennes versions de packages Maven (en conservant les N plus récentes + versions protégées) ;
+#  - purge les caches Actions non accédés depuis > 7 jours (non facturés, mais limités à 10 GB/repo).
+#
+# Le repo est public : les minutes Actions de ce workflow sont gratuites.
+# Requiert un secret repo `JOUTIO_GITHUB_TOKEN` (PAT classic `repo` + `delete:packages`).
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Versions d'image à conserver par package"
+        required: false
+        default: "1"
+      maven-keep:
+        description: "Versions Maven à conserver par package"
+        required: false
+        default: "2"
+      maven-protect:
+        description: "Versions Maven à ne jamais supprimer (CSV), ex. versions cross-service et parents référencés"
+        required: false
+        default: "0.0.1,1.0.0"
+      dry-run:
+        description: "Simuler sans supprimer (true/false)"
+        required: false
+        default: "true"
+
+concurrency:
+  group: prune-packages
+  cancel-in-progress: false
+
+jobs:
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Collecter les tags déployés (joutio-gitops)
+        id: deployed
+        env:
+          GH_TOKEN: ${{ secrets.JOUTIO_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          MAP=""
+          paths=$(gh api "/repos/joutio/joutio-gitops/git/trees/main?recursive=1" \
+            --jq '.tree[].path | select(test("\\.argocd-source-.*\\.ya?ml$"))' 2>/dev/null || true)
+          for p in $paths; do
+            content=$(gh api "/repos/joutio/joutio-gitops/contents/$p" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)
+            img=$(printf '%s' "$content" | grep -oE 'ghcr\.io/[^ :]+:[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+            pkg=$(printf '%s' "$img" | sed -E 's#.*/##; s#:.*##')
+            tag=$(printf '%s' "$img" | sed -E 's#.*:##')
+            [ -n "$pkg" ] && [ -n "$tag" ] && MAP="${MAP}${pkg}=${tag}"$'\n'
+          done
+          {
+            echo "map<<EOF"
+            printf '%s' "$MAP"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Protection par package :"; printf '%s' "$MAP"
+
+      - name: Purger les images GHCR
+        uses: ./actions/prune-packages
+        with:
+          token: ${{ secrets.JOUTIO_GITHUB_TOKEN }}
+          owner: joutio
+          package-type: container
+          keep: ${{ inputs.keep || '1' }}
+          protect-map: ${{ steps.deployed.outputs.map }}
+          dry-run: ${{ inputs.dry-run || 'false' }}
+
+  maven:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Les POM parents sont référencés par les contrats déjà publiés (ex. joutio-social-domain:4.0.0
+      # → joutio-parent:4.1.0) : leur suppression casse la résolution transitive des builds.
+      - name: Protéger toutes les versions de joutio-parent
+        id: maven-parents
+        env:
+          GH_TOKEN: ${{ secrets.JOUTIO_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          map=""
+          for pkg in com.joutio.joutio-parent; do
+            versions=$(gh api --paginate "/orgs/joutio/packages/maven/$pkg/versions?per_page=100" \
+              --jq '.[].name' 2>/dev/null | sort -u | paste -sd, - || true)
+            [ -n "$versions" ] && map="${map}${pkg}=${versions}"$'\n'
+          done
+          {
+            echo "map<<EOF"
+            printf '%s' "$map"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Protection parents Maven :"; printf '%s' "$map"
+
+      - name: Purger les packages Maven
+        uses: ./actions/prune-packages
+        with:
+          token: ${{ secrets.JOUTIO_GITHUB_TOKEN }}
+          owner: joutio
+          package-type: maven
+          keep: ${{ inputs.maven-keep || '2' }}
+          protect-tags: ${{ inputs.maven-protect || '0.0.1,1.0.0' }}
+          protect-map: ${{ steps.maven-parents.outputs.map }}
+          dry-run: ${{ inputs.dry-run || 'false' }}
+
+  caches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Purger les caches Actions (> 7 jours)
+        env:
+          GH_TOKEN: ${{ secrets.JOUTIO_GITHUB_TOKEN }}
+          ORG: joutio
+          DRY_RUN: ${{ inputs.dry-run || 'false' }}
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "Cutoff (last_accessed_at < $cutoff)"
+          repos=$(gh repo list "$ORG" --limit 200 --json name,isPrivate --jq '.[] | select(.isPrivate) | .name')
+          for repo in $repos; do
+            echo "::group::$repo"
+            gh api --paginate "/repos/$ORG/$repo/actions/caches?per_page=100" \
+              --jq '.actions_caches[] | "\(.id)\t\(.last_accessed_at)"' | \
+              while IFS=$'\t' read -r id accessed; do
+                [ -z "$id" ] && continue
+                if [[ "$accessed" < "$cutoff" ]]; then
+                  if [ "$DRY_RUN" = "true" ]; then
+                    echo "[dry-run] delete cache $id (last_accessed=$accessed)"
+                  else
+                    gh api -X DELETE "/repos/$ORG/$repo/actions/caches/$id" >/dev/null \
+                      && echo "deleted cache $id ($accessed)"
+                  fi
+                fi
+              done
+            echo "::endgroup::"
+          done

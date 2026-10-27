@@ -1,0 +1,103 @@
+name: Frontend Release
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version"
+        required: false
+        type: string
+        default: "22"
+      github-username:
+        description: "GitHub username used for GHCR authentication"
+        required: true
+        type: string
+      service-name:
+        description: "Service name for Docker image and deploy target"
+        required: false
+        type: string
+        default: "frontend"
+      platforms:
+        description: "Target platforms (buildx --platform)"
+        required: false
+        type: string
+        default: "linux/arm64"
+      vite-api-url:
+        description: "VITE_API_URL inliné au build"
+        required: false
+        type: string
+        default: ""
+      vite-bff-url:
+        description: "VITE_BFF_URL inliné au build (surface admin BFF, optionnel)"
+        required: false
+        type: string
+        default: ""
+      vite-oidc-authority:
+        description: "VITE_OIDC_AUTHORITY inliné au build"
+        required: false
+        type: string
+        default: ""
+      vite-oidc-client-id:
+        description: "VITE_OIDC_CLIENT_ID inliné au build"
+        required: false
+        type: string
+        default: "web"
+      vite-oidc-redirect-uri:
+        description: "VITE_OIDC_REDIRECT_URI inliné au build"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      GITHUB_PASSWORD:
+        description: "GitHub token (PAT) for release, image push and repository_dispatch"
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout reusable workflow assets
+        uses: actions/checkout@v5
+        with:
+          repository: joutio/joutio-reusable-workflows
+          path: reusable-workflows
+          sparse-checkout: docker
+          token: ${{ secrets.GITHUB_PASSWORD }}
+
+      - name: Semantic Release
+        id: release
+        uses: joutio/joutio-reusable-workflows/actions/semantic-release@main
+        with:
+          node-version: ${{ inputs.node-version }}
+          release-profile: npm
+          github-token: ${{ secrets.GITHUB_PASSWORD }}
+
+      - name: Get release version
+        if: steps.release.outputs.released == 'true'
+        id: version
+        run: |
+          echo "version=${{ steps.release.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & Push Docker image
+        if: steps.release.outputs.released == 'true'
+        uses: joutio/joutio-reusable-workflows/actions/build-push-docker@main
+        with:
+          service-name: ${{ inputs.service-name }}
+          version: ${{ steps.version.outputs.version }}
+          dockerfile: frontend
+          platforms: ${{ inputs.platforms }}
+          extra-build-args: |
+            VITE_API_URL=${{ inputs.vite-api-url }}
+            VITE_BFF_URL=${{ inputs.vite-bff-url }}
+            VITE_OIDC_AUTHORITY=${{ inputs.vite-oidc-authority }}
+            VITE_OIDC_CLIENT_ID=${{ inputs.vite-oidc-client-id }}
+            VITE_OIDC_REDIRECT_URI=${{ inputs.vite-oidc-redirect-uri }}
+          github-username: ${{ inputs.github-username }}
+          github-password: ${{ secrets.GITHUB_PASSWORD }}
+          repository: ${{ github.repository }}
+

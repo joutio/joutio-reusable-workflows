@@ -1,0 +1,93 @@
+name: Service Release
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: "Java version"
+        required: false
+        type: string
+        default: "25"
+      github-username:
+        description: "GitHub username used for GitHub Packages and GHCR authentication"
+        required: true
+        type: string
+      service-name:
+        description: "Service name (used for Docker image name and deploy target)"
+        required: true
+        type: string
+      port:
+        description: "Container port exposed by the service"
+        required: false
+        type: string
+        default: "8080"
+    secrets:
+      GITHUB_PASSWORD:
+        description: "GitHub token (PAT) for release, packages and repository_dispatch"
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout reusable workflow assets
+        uses: actions/checkout@v5
+        with:
+          repository: joutio/joutio-reusable-workflows
+          path: reusable-workflows
+          sparse-checkout: docker
+          token: ${{ secrets.GITHUB_PASSWORD }}
+
+      - name: Setup Java + Maven
+        uses: joutio/joutio-reusable-workflows/actions/setup-java-maven@main
+        with:
+          java-version: ${{ inputs.java-version }}
+          server-username: ${{ inputs.github-username }}
+          server-password: ${{ secrets.GITHUB_PASSWORD }}
+
+      - name: Semantic Release
+        id: release
+        uses: joutio/joutio-reusable-workflows/actions/semantic-release@main
+        with:
+          release-profile: maven
+          github-token: ${{ secrets.GITHUB_PASSWORD }}
+
+      - name: Get release version
+        if: steps.release.outputs.released == 'true'
+        id: version
+        run: |
+          echo "version=${{ steps.release.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Find JAR
+        if: steps.release.outputs.released == 'true'
+        id: jar
+        run: |
+          JAR=$(find . -path '*/target/*.jar' -name '*-infrastructure-*.jar' ! -name '*-plain.jar' | head -1)
+          if [ -z "$JAR" ]; then
+            JAR=$(find . -path '*/target/*.jar' ! -name '*-plain.jar' ! -name 'original-*' | head -1)
+          fi
+          echo "jar_path=${JAR}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage JAR for Docker build
+        if: steps.version.outputs.version && steps.jar.outputs.jar_path
+        run: cp "${{ steps.jar.outputs.jar_path }}" app.jar
+
+      - name: Build & Push Docker image
+        if: steps.release.outputs.released == 'true' && steps.jar.outputs.jar_path
+        uses: joutio/joutio-reusable-workflows/actions/build-push-docker@main
+        with:
+          service-name: ${{ inputs.service-name }}
+          version: ${{ steps.version.outputs.version }}
+          dockerfile: service
+          extra-build-args: |
+            PORT=${{ inputs.port }}
+            JAR_FILE=app.jar
+          github-username: ${{ inputs.github-username }}
+          github-password: ${{ secrets.GITHUB_PASSWORD }}
+          repository: ${{ github.repository }}
+
