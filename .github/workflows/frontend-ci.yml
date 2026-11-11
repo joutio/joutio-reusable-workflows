@@ -19,12 +19,17 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: npm
+          # Paquets de l'organisation (@joutio/*) sur GitHub Packages : un jeton est requis même en public.
+          registry-url: https://npm.pkg.github.com
+          scope: '@joutio'
 
       - name: Lint commit messages
         uses: wagoid/commitlint-github-action@v6
 
       - name: Install dependencies
         run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Lint
         run: npm run lint

@@ -68,7 +68,13 @@ runs:
           [ -n "$line" ] && EXTRA_ARGS="$EXTRA_ARGS --build-arg $line"
         done <<< "${{ inputs.extra-build-args }}"
 
+        # Jeton GitHub Packages pour npm (paquets @joutio/*), passé en secret BuildKit (docker/Dockerfile.frontend).
+        NPMRC="$(mktemp)"
+        trap 'rm -f "$NPMRC"' EXIT
+        printf '@joutio:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "${{ inputs.github-password }}" > "$NPMRC"
+
         docker buildx build \
+          --secret id=npmrc,src="$NPMRC" \
           --platform "${{ inputs.platforms }}" \
           $EXTRA_ARGS \
           --label "org.opencontainers.image.source=https://github.com/${{ inputs.repository }}" \
