@@ -11,6 +11,7 @@ Fournir des **actions GitHub Actions réutilisables** pour tous les repos Joutio
 - **build-push-docker** : build d'une image Docker + push (utilisé par tous les services)
 - **semantic-release** : release automatique versionnée
 - **setup-java-maven** : setup du toolchain Java/Maven (versions gérées par le BOM)
+- **setup-node-npm** : setup Node + `npm/.npmrc` (paquets `@joutio/*` sur GitHub Packages, PAT `GITHUB_PASSWORD`), pendant npm de `setup-java-maven`
 - **prune-packages** : purge des anciennes versions GHCR (rétention stockage)
 
 + **Dockerfiles** partagés (`Dockerfile.service`, `Dockerfile.frontend`), config
@@ -33,12 +34,14 @@ joutio-reusable-workflows/
 │   ├── build-push-docker/   ← action composite : build + push image
 │   ├── semantic-release/    ← action composite : release versionnée
 │   ├── setup-java-maven/    ← action composite : setup Java/Maven
+│   ├── setup-node-npm/      ← action composite : setup Node/npm (+ npm/.npmrc)
 │   └── prune-packages/      ← action composite : purge versions GHCR
 ├── .github/workflows/        ← workflows réutilisables (frontend, service, lib, mobile)
 ├── docker/
 │   ├── Dockerfile.service    ← Dockerfile générique microservice
 │   └── Dockerfile.frontend   ← Dockerfile frontend (nginx)
 ├── maven/                    ← config Maven partagée (settings, etc.)
+├── npm/                      ← config npm partagée (.npmrc GitHub Packages)
 └── semantic-release/         ← config semantic-release
 ```
 

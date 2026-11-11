@@ -4,8 +4,8 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-# Paquets @joutio/* (GitHub Packages) : le jeton arrive en secret BuildKit, monté comme .npmrc le temps de
-# l'installation seulement (jamais dans une couche). Sans secret, l'installation se fait sans jeton.
+# Paquets @joutio/* (GitHub Packages) : npm/.npmrc arrive en secret BuildKit (build-push-docker), monté le temps
+# de l'installation seulement, jamais dans une couche.
 RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
 
 COPY . .

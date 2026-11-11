@@ -39,6 +39,7 @@ Workflows GitHub Actions réutilisables pour l'organisation Joutio.
 | Action             | Fichier                               | Description                                                                                                      |
 |--------------------|---------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | `setup-java-maven` | `actions/setup-java-maven/action.yml` | Encapsule `actions/setup-java@v5` avec `server-id`, `server-username` et `server-password` pour GitHub Packages. |
+| `setup-node-npm` | `actions/setup-node-npm/action.yml` | Encapsule `actions/setup-node@v5` et copie `npm/.npmrc` (scope `@joutio` sur GitHub Packages) avec `server-password` (PAT `GITHUB_PASSWORD`), comme `setup-java-maven` avec `maven/settings.xml`. |
 | `semantic-release` | `actions/semantic-release/action.yml` | Encapsule l'installation + l'exécution de semantic-release avec profils `maven`/`npm` partagés.                  |
 | `prune-packages`   | `actions/prune-packages/action.yml`   | Supprime les anciennes versions de packages (GHCR), conserve les N plus récentes + les tags protégés.           |
 
