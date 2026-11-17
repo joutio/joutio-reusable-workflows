@@ -1,66 +1,26 @@
 # AGENTS.md — joutio-reusable-workflows
 
-> **DevOps** : GitHub Actions réutilisables (composite actions) + Dockerfiles + config Maven /
-> semantic-release. Hors périmètre de l'architecture hexagonale Java.
+GitHub Actions communes à tous les dépôts Joutio : workflows réutilisables (`.github/workflows/`),
+actions composites (`actions/`), Dockerfiles (`docker/`), configuration Maven, npm et
+semantic-release partagée. Hors architecture hexagonale.
 
----
+Lire : `../../AGENTS.md`, puis **[`docs/ops/ci.md`](../../docs/ops/ci.md)** (workflows, actions,
+release, secrets des dépôts, rétention du stockage).
 
-## 1. Rôle
+## Règles
 
-Fournir des **actions GitHub Actions réutilisables** pour tous les repos Joutio :
-- **build-push-docker** : build d'une image Docker + push (utilisé par tous les services)
-- **semantic-release** : release automatique versionnée
-- **setup-java-maven** : setup du toolchain Java/Maven (versions gérées par le BOM)
-- **setup-node-npm** : setup Node + `npm/.npmrc` (paquets `@joutio/*` sur GitHub Packages, PAT `GITHUB_PASSWORD`), pendant npm de `setup-java-maven`
-- **prune-packages** : purge des anciennes versions GHCR (rétention stockage)
+- Les wrappers des dépôts appellent `…@main` : toute modification ici touche immédiatement toutes
+  les CI. Garder les entrées rétrocompatibles ou mettre à jour tous les wrappers dans le même lot.
+- Un secret ne s'écrit jamais en clair : seuls `JOUTIO_GITHUB_USERNAME` (variable) et
+  `JOUTIO_GITHUB_TOKEN` (secret) sont attendus des dépôts, plus les secrets propres au mobile.
+- `prune-packages.yml` ne supprime jamais un tag déployé ni une version de `joutio-parent`.
+- Images en `linux/arm64` (cluster de Raspberry Pi).
 
-+ **Dockerfiles** partagés (`Dockerfile.service`, `Dockerfile.frontend`), config
-**semantic-release** (versioning + changelog) et workflows réutilisables :
-`frontend-ci`/`frontend-release`, `service-ci`/`service-release`, `lib-ci`/`lib-release`,
-**`mobile-ci`/`mobile-release`** (typecheck/doctor + APK Android signé sur `main`).
-
-+ **Workflow planifié** `prune-packages.yml` : purge GHCR + packages Maven + caches Actions
-(allowance Free 0,5 GB partagée artefacts/Packages). Toutes les versions de `joutio-parent` sont
-protégées : les POM parents restent référencés par les contrats déjà publiés (sinon la résolution
-transitive des builds casse). Le `Dockerfile.service` utilise `COPY --chown` (un seul layer app).
-
----
-
-## 2. Structure
+## Structure
 
 ```
-joutio-reusable-workflows/
-├── actions/
-│   ├── build-push-docker/   ← action composite : build + push image
-│   ├── semantic-release/    ← action composite : release versionnée
-│   ├── setup-java-maven/    ← action composite : setup Java/Maven
-│   ├── setup-node-npm/      ← action composite : setup Node/npm (+ npm/.npmrc)
-│   └── prune-packages/      ← action composite : purge versions GHCR
-├── .github/workflows/        ← workflows réutilisables (frontend, service, lib, mobile)
-├── docker/
-│   ├── Dockerfile.service    ← Dockerfile générique microservice
-│   └── Dockerfile.frontend   ← Dockerfile frontend (nginx)
-├── maven/                    ← config Maven partagée (settings, etc.)
-├── npm/                      ← config npm partagée (.npmrc GitHub Packages)
-└── semantic-release/         ← config semantic-release
+actions/{build-push-docker,semantic-release,setup-java-maven,setup-node-npm,prune-packages}/action.yml
+.github/workflows/{service,lib,frontend,mobile}-{ci,release}.yml, domain-bootstrap.yml, prune-packages.yml
+docker/Dockerfile.service, docker/Dockerfile.frontend
+maven/settings.xml, npm/.npmrc, semantic-release/release.{maven,npm}.config.cjs
 ```
-
-> `mobile-release` : semantic-release (profil `npm`, version dans `package.json` + `CHANGELOG.md`)
-> puis `expo prebuild` + `gradlew assembleRelease bundleRelease` (arm64), publication d'une
-> pre-release `apk-<run_id>` avec **APK et AAB signés** et attachement des deux artefacts à la
-> release `v<version>`. L'APK sert au test direct, l'AAB est prêt pour un upload Play Console
-> (l'upload automatisé reste à brancher avec un compte de service Play). Il attend les secrets
-> keystore Android du caller et reçoit `google-web-client-id` (client OAuth Web utilisé comme
-> audience des ID tokens Google, injecté dans `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`).
-
----
-
-## 3. Contrats cassés / TODO
-
-- **Aucun contrat cassé** — c'est un dépôt de CI/CD réutilisable.
-
----
-
-## 4. Patterns de référence
-
-Hors périmètre hexagonal. Voir `README.md` du repo pour les détails des actions.
