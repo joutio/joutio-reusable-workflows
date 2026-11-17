@@ -12,7 +12,7 @@ release, secrets des dépôts, rétention du stockage).
 - Les wrappers des dépôts appellent `…@main` : toute modification ici touche immédiatement toutes
   les CI. Garder les entrées rétrocompatibles ou mettre à jour tous les wrappers dans le même lot.
 - Un secret ne s'écrit jamais en clair : seuls `JOUTIO_GITHUB_USERNAME` (variable) et
-  `JOUTIO_GITHUB_TOKEN` (secret) sont attendus des dépôts, plus les secrets propres au mobile.
+  `JOUTIO_GITHUB_TOKEN` (secret) sont attendus des dépôts (le mobile ajoute les siens à son propre `release.yml`).
 - `prune-packages.yml` ne supprime jamais un tag déployé ni une version de `joutio-parent`.
 - Images en `linux/arm64` (cluster de Raspberry Pi).
 
@@ -20,7 +20,7 @@ release, secrets des dépôts, rétention du stockage).
 
 ```
 actions/{build-push-docker,semantic-release,setup-java-maven,setup-node-npm,prune-packages}/action.yml
-.github/workflows/{service,lib,frontend,mobile}-{ci,release}.yml, domain-bootstrap.yml, prune-packages.yml
+.github/workflows/{service,lib,frontend}-{ci,release}.yml, domain-bootstrap.yml, prune-packages.yml
 docker/Dockerfile.service, docker/Dockerfile.frontend
 maven/settings.xml, npm/.npmrc, semantic-release/release.{maven,npm}.config.cjs
 ```
