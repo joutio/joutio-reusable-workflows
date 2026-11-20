@@ -21,6 +21,11 @@ on:
         required: false
         type: string
         default: "8080"
+      aot-training-env:
+        description: "Variables (KEY=VALUE par ligne, valeurs factices) du démarrage d'entraînement du cache AOT, profil local"
+        required: false
+        type: string
+        default: ""
     secrets:
       GITHUB_PASSWORD:
         description: "GitHub token (PAT) for release, packages and repository_dispatch"
@@ -90,4 +95,5 @@ jobs:
           github-username: ${{ inputs.github-username }}
           github-password: ${{ secrets.GITHUB_PASSWORD }}
           repository: ${{ github.repository }}
+          aot-training-env: ${{ inputs.aot-training-env }}
 

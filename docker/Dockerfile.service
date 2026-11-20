@@ -1,17 +1,34 @@
-FROM eclipse-temurin:25-jre-alpine
+# Jar Spring Boot extrait (`jarmode=tools`) : le cache AOT exige un classpath de jars plats, pas un jar imbriqué.
+FROM eclipse-temurin:25-jre-alpine AS extract
+
+ARG JAR_FILE=app.jar
+
+WORKDIR /build
+COPY ${JAR_FILE} app.jar
+RUN java -Djarmode=tools -jar app.jar extract --destination app
+
+# Image sans cache : sert au démarrage d'entraînement de la CI (`build-push-docker`).
+FROM eclipse-temurin:25-jre-alpine AS app
 
 ARG PORT=8080
-ARG JAR_FILE=app.jar
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
 
-COPY --chown=appuser:appgroup ${JAR_FILE} app.jar
+COPY --from=extract --chown=appuser:appgroup /build/app /app
 
 USER appuser
 
 EXPOSE ${PORT}
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-XX:+UseSerialGC", "-jar", "app.jar"]
 
+# Image publiée : cache AOT de JDK 25 (`app.aot`, produit par l'entraînement) chargé au démarrage. Classes déjà
+# chargées et liées, profils de méthodes : moins de CPU au démarrage. Un cache incompatible est ignoré par la JVM.
+# SerialGC explicite, comme l'ergonomie le choisit déjà sous 1 CPU : entraînement et prod sur le même GC.
+FROM app AS aot
+
+COPY --chown=appuser:appgroup app.aot /app/app.aot
+
+ENTRYPOINT ["java", "-XX:AOTCache=app.aot", "-XX:+UseSerialGC", "-jar", "app.jar"]

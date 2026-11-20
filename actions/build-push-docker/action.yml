@@ -29,6 +29,10 @@ inputs:
   repository:
     description: "Repo appelant (owner/name) pour le label OCI source"
     required: true
+  aot-training-env:
+    description: "Variante 'service' : variables du démarrage d'entraînement AOT, un KEY=VALUE par ligne (valeurs factices)"
+    required: false
+    default: ""
 
 outputs:
   image:
@@ -57,6 +61,62 @@ runs:
         echo "${{ inputs.github-password }}" | \
           docker login ghcr.io -u ${{ inputs.github-username }} --password-stdin
 
+    # Variante `service` : cache AOT de JDK 25. L'image sans cache (cible `app`) démarre une fois sous QEMU (arm64,
+    # même JVM que la prod), profil `local`, contre une Postgres et un Kafka éphémères, jusqu'au rafraîchissement du
+    # contexte (`spring.context.exit=onRefresh`), puis la cible `aot` embarque le cache produit (`app.aot`).
+    - name: Build image for AOT training
+      if: inputs.dockerfile == 'service'
+      shell: bash
+      run: |
+        case "${{ inputs.platforms }}" in
+          *,*) echo "::error::Cache AOT : une seule plateforme (il dépend de l'architecture)"; exit 1 ;;
+        esac
+        docker buildx build \
+          --pull \
+          --platform "${{ inputs.platforms }}" \
+          --target app \
+          --cache-from type=gha \
+          --provenance=false \
+          -f "${{ github.action_path }}/../../docker/Dockerfile.service" \
+          -t joutio-aot-training \
+          --load \
+          .
+
+    - name: Train AOT cache
+      if: inputs.dockerfile == 'service'
+      shell: bash
+      run: |
+        docker run -d --name aot-postgres --network host \
+          -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=joutio_${{ inputs.service-name }} \
+          postgres:16-alpine
+        docker run -d --name aot-kafka --network host apache/kafka:3.7.0
+        trap 'docker rm -f aot-postgres aot-kafka >/dev/null' EXIT
+        for i in $(seq 1 60); do
+          docker exec aot-postgres pg_isready -U postgres >/dev/null 2>&1 \
+            && docker exec aot-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 \
+            && break
+          sleep 2
+        done
+
+        ENV_ARGS=""
+        while IFS= read -r line; do
+          [ -n "$line" ] && ENV_ARGS="$ENV_ARGS -e $line"
+        done <<< "${{ inputs.aot-training-env }}"
+
+        OUT="$(mktemp -d)"
+        chmod 777 "$OUT"
+        docker run --rm --platform "${{ inputs.platforms }}" --network host \
+          -v "$OUT:/out" \
+          -e SPRING_PROFILES_ACTIVE=local \
+          $ENV_ARGS \
+          --entrypoint java joutio-aot-training \
+          -XX:AOTCacheOutput=/out/app.aot -XX:+UseSerialGC \
+          -Dspring.context.exit=onRefresh \
+          -jar app.jar
+        test -s "$OUT/app.aot"
+        cp "$OUT/app.aot" app.aot
+        ls -la app.aot
+
     - name: Build & Push
       shell: bash
       run: |
@@ -75,8 +135,12 @@ runs:
 
         # `--pull` : images de base (temurin, node, nginx) toujours reprises du registre, jamais d'une couche en cache,
         # pour embarquer leurs correctifs de sécurité à chaque release.
+        TARGET=""
+        [ "${{ inputs.dockerfile }}" = "service" ] && TARGET="--target aot"
+
         docker buildx build \
           --pull \
+          $TARGET \
           --secret id=npmrc,src="$NPMRC" \
           --platform "${{ inputs.platforms }}" \
           $EXTRA_ARGS \
