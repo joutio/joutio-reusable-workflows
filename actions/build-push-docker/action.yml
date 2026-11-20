@@ -73,7 +73,10 @@ runs:
         trap 'rm -f "$NPMRC"' EXIT
         SERVER_PASSWORD="${{ inputs.github-password }}" envsubst '$SERVER_PASSWORD' < "${{ github.action_path }}/../../npm/.npmrc" > "$NPMRC"
 
+        # `--pull` : images de base (temurin, node, nginx) toujours reprises du registre, jamais d'une couche en cache,
+        # pour embarquer leurs correctifs de sécurité à chaque release.
         docker buildx build \
+          --pull \
           --secret id=npmrc,src="$NPMRC" \
           --platform "${{ inputs.platforms }}" \
           $EXTRA_ARGS \
